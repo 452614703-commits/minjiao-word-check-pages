@@ -1,0 +1,102 @@
+<!doctype html>
+<html lang="zh-CN">
+  <head>
+    <meta charset="utf-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1">
+    <meta name="robots" content="noindex, nofollow">
+    <meta name="referrer" content="no-referrer">
+    <meta http-equiv="Content-Security-Policy" content="default-src 'none'; script-src 'unsafe-inline'; style-src 'unsafe-inline'; connect-src 'self'; img-src 'self' data:; base-uri 'none'; form-action 'none'">
+    <title>闽教英语单词检测</title>
+    <style id="gate-style">
+      * { box-sizing: border-box; }
+      body { margin: 0; font-family: system-ui, -apple-system, "Microsoft YaHei", sans-serif; color: #20302a; background: #f5f5ed; }
+      #root { min-height: 100vh; display: grid; place-items: center; padding: 24px; }
+      .gate { width: min(100%, 380px); background: #fdfdf9; border: 1px solid #dce1d6; border-radius: 18px; padding: 28px; }
+      h1 { margin: 0 0 8px; font-size: 1.45rem; }
+      p { margin: 0 0 20px; color: #59665d; line-height: 1.6; }
+      label { display: block; margin-bottom: 8px; font-weight: 650; font-size: .9rem; }
+      input, button { width: 100%; min-height: 46px; font: inherit; border-radius: 9px; }
+      input { border: 1px solid #aab9ac; padding: 9px 12px; color: #20302a; background: #fff; }
+      button { border: 0; margin-top: 12px; background: #264c3d; color: #fff; font-weight: 700; cursor: pointer; }
+      button:disabled { opacity: .55; cursor: wait; }
+      input:focus-visible, button:focus-visible { outline: 3px solid #8da969; outline-offset: 3px; }
+      #message { margin: 10px 0 0; color: #963832; font-size: .87rem; }
+      #message:empty { display: none; }
+    </style>
+  </head>
+  <body>
+    <div id="root">
+      <main class="gate">
+        <h1>闽教英语单词检测</h1>
+        <p>输入访问密码即可开始。</p>
+        <form id="unlock">
+          <label for="password">访问密码</label>
+          <input id="password" type="password" required autocomplete="current-password" spellcheck="false">
+          <button id="open" type="submit">打开词库</button>
+          <p id="message" role="alert"></p>
+        </form>
+      </main>
+    </div>
+    <script type="module">
+      const form = document.getElementById("unlock");
+      const field = document.getElementById("password");
+      const button = document.getElementById("open");
+      const message = document.getElementById("message");
+      const encoder = new TextEncoder();
+      const decoder = new TextDecoder();
+      let encrypted;
+
+      async function readPackage() {
+        const response = await fetch("./practice.bin");
+        if (!response.ok) throw new Error("Package unavailable");
+        const data = new Uint8Array(await response.arrayBuffer());
+        if (data.length < 49 || decoder.decode(data.slice(0, 4)) !== "MJC1") {
+          throw new Error("Invalid package");
+        }
+        return data;
+      }
+
+      form.addEventListener("submit", async (event) => {
+        event.preventDefault();
+        if (button.disabled) return;
+        const password = field.value.replace(/[\s-]/g, "").toUpperCase();
+        message.textContent = "";
+        if (!crypto.subtle) {
+          message.textContent = "请用浏览器打开这个 HTTPS 网址。";
+          return;
+        }
+        button.disabled = true;
+        button.textContent = "正在打开…";
+        try {
+          encrypted ??= await readPackage();
+          const header = encrypted.slice(0, 32);
+          const material = await crypto.subtle.importKey("raw", encoder.encode(password), "PBKDF2", false, ["deriveKey"]);
+          const key = await crypto.subtle.deriveKey(
+            { name: "PBKDF2", salt: header.slice(4, 20), iterations: 600000, hash: "SHA-256" },
+            material, { name: "AES-GCM", length: 256 }, false, ["decrypt"],
+          );
+          const plaintext = await crypto.subtle.decrypt(
+            { name: "AES-GCM", iv: header.slice(20), additionalData: header }, key, encrypted.slice(32),
+          );
+          const app = JSON.parse(decoder.decode(plaintext));
+          const style = document.createElement("style");
+          style.textContent = app.style;
+          const script = document.createElement("script");
+          script.type = "module";
+          script.textContent = app.script;
+          field.value = "";
+          document.getElementById("gate-style").remove();
+          document.head.append(style);
+          document.body.append(script);
+        } catch (error) {
+          message.textContent = error.name === "OperationError" ? "密码不对，请再试一次。" : "暂时无法打开词库，请重试。";
+          field.focus();
+          field.select();
+        } finally {
+          button.disabled = false;
+          button.textContent = "打开词库";
+        }
+      });
+    </script>
+  </body>
+</html>
